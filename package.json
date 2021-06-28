@@ -22,13 +22,13 @@
   "bugs": {
     "url": "https://github.com/unforswearing/switch-hosts/issues"
   },
-  "homepage": "https://github.com/unforswearing/switch-hosts#readme"
-},
-"os": [
-  "darwin",
-  "linux"
-],
-"funding": {
-  "type" : "individual",
-  "url" : "https://www.unforswearing.com/#/"
+  "homepage": "https://github.com/unforswearing/switch-hosts#readme",
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "funding": {
+    "type" : "individual",
+    "url" : "https://www.unforswearing.com/#/"
+  }
 }
