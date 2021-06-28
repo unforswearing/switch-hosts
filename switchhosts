@@ -1,0 +1,297 @@
+#!/bin/bash
+# using file(s) sourced from https://github.com/StevenBlack/hosts
+hosts() {
+    local OPT
+    local TYPE
+
+    OPT="$1"
+    TYPE="$2"
+
+    _prog_() {
+        # usage 'prog "command/function/script"'
+        [[ "$1" == "" ]] && exit 0
+
+        set +m
+        tput civis
+
+        { eval "$1" > /dev/null 2>&1 & } > /dev/null 2>&1
+
+        pid=$! # Process Id of the previous running command
+        spin="-\|/" #-\|/
+        i=0
+
+        while kill -0 $pid 2>/dev/null
+        do
+        i=$(( (i+1) %4 ))
+        printf "\r${spin:$i:1}"
+        sleep .07
+        done
+        printf "\r"
+
+        tput cnorm
+        set -m
+    }
+
+    _help() {
+        echo "
+usage:
+  hosts [option...] [default|loose]
+
+options:
+  allow       enter a url to remove from the current hosts file
+  clear       replace hosts file with the default hosts (no blocking)
+  list        print the currently installed hosts file
+  restore     choose between the 'default' and 'loose' hosts files
+  schedule    add a cron job to automatically update hosts files
+  search      search for a url in the current hosts file
+  switch      switch between 'default' and 'loose' hosts files
+  update      manually update hosts files
+  type        list the installed file, either 'default' or 'loose'
+  repl        run hosts in a repl. useful for running multiple 'allow' commands
+"
+    }
+
+    HOSTS_FILE=/etc/hosts
+
+    # Need to create the hosts files if they do not exist...
+    file_hosts_type="$HOME"/.hosts_type
+    if [ ! -e "$file_hosts_type" ] ; then
+        touch "$file_hosts_type"
+    fi
+
+    file_hosts_default="$HOME"/.hosts_default
+    if [ ! -e "$file_hosts_default" ] ; then
+        touch "$file_hosts_default"
+    fi
+
+    file_hosts_loose="$HOME"/.hosts_loose
+    if [ ! -e "$file_hosts_loose" ] ; then
+        touch "$file_hosts_loose"
+    fi
+
+    file_hosts_cron="$HOME"/.hosts_cron
+
+    default="http://sbc.io/hosts/alternates/fakenews-gambling-porn-social/hosts"
+    loose="http://sbc.io/hosts/hosts"
+
+    update_default="curl -s $default > $HOME/.hosts_default"
+    update_loose="curl -s $loose > $HOME/.hosts_loose"
+
+    _setblank() { echo "blank" > "$file_hosts_type"; }
+
+    _setloose() { echo "loose" > "$file_hosts_type"; }
+    _moveloose() { cp -i "$file_hosts_loose" "$HOSTS_FILE"; }
+
+    _setdefault() { echo "default" > "$file_hosts_type"; }
+    _movedefault() { cp -i "$file_hosts_default" "$HOSTS_FILE"; }
+
+    hoststype="$(grep "" "$file_hosts_type")"
+
+    _schedule() {
+        _has_job() { echo "Scheduled cron update for \"$1\" already exists."; }
+        _do_cron() {
+            croncommand="$1"
+            echo "$croncommand" >> "$file_hosts_cron"
+            crontab "$file_hosts_cron" > /dev/null 2>&1;
+            echo "Scheduled cron job for hosts_$TYPE"
+        }
+
+        crontab -l > "$file_hosts_cron"
+
+        case $TYPE in
+            default)
+                grep -q "$default" "$file_hosts_cron" && _has_job "$default" \
+                || _do_cron "0 0 7 * 1 $update_default"
+            ;;
+            loose)
+                grep -q "$loose" "$file_hosts_cron" && _has_job "$loose" \
+                || _do_cron "0 0 7 * 2 $update_loose"
+            ;;
+            *) _help ;;
+        esac
+
+        echo > "$file_hosts_cron"
+    }
+
+    _allow() {
+    	_whitelist_site() {
+            cat $HOSTS_FILE > /tmp/hostsfile
+
+            # this is NOT comprehensive, but works for fb, instagram, reddit, tumblr and twitter
+            case $TYPE in
+                facebook) grep -v "$TYPE\|fbcdn" /tmp/hostsfile > $HOSTS_FILE ;;
+                *) grep -v $TYPE /tmp/hostsfile > $HOSTS_FILE ;;
+            esac
+    	}
+
+        _whitelist_site && echo "Sitename $TYPE is whitelisted in $HOSTS_FILE"
+    }
+
+    _read_file() {
+      # give hosts a file and read commands from each line
+      # eg.
+      #   'update loose'
+      #   'install default'
+      #   'allow reddit'
+      if [[ -f $TYPE ]]; then
+        while read line; do
+          local command
+          local argument
+
+          command=$(echo $line | awk -F" " '{print $1}')
+          argument=$(echo $line | awk -F" " '{print $2}')
+
+          # i will need to handle some / all commands individually
+          hosts "$command" "$argument" && read
+          read
+        done < <(cat $TYPE)
+      else
+        echo "$TYPE is not a file or it doesn't exist"
+      fi
+    }
+
+    _update_hosts() {
+        _do_update() {
+            echo "Updating hosts file from remote source"
+            _prog_ "$1"
+            _movedefault
+            _setdefault
+            echo "Hosts file updated in ~/.hosts_$TYPE and $HOSTS_FILE"
+        }
+
+        case $TYPE in
+            default) _do_update "$update_default" ;;
+            loose) _do_update "$update_loose" ;;
+            *) _help ;;
+        esac
+    }
+
+    # create an (almost) empty hosts file for debugging
+    _clear_hosts() {
+        # base hosts file info
+        _blankhosts() {
+            echo "127.0.0.1 localhost
+127.0.0.1 localhost.localdomain
+127.0.0.1 local
+255.255.255.255 broadcasthost
+::1 localhost
+::1 ip6-localhost
+::1 ip6-loopback
+fe80::1%lo0 localhost
+ff00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+ff02::3 ip6-allhosts
+0.0.0.0 0.0.0.0"
+        }
+
+        echo "Creating a blank hosts file"
+        _blankhosts > "$HOSTS_FILE"
+        _setblank
+    }
+
+    _restore_hosts() {
+        if [ -z "$TYPE" ]; then
+            read -p "Which hosts file to restore? (default/loose) " TYPE
+        fi
+
+        echo "Restoring hosts_$TYPE file"
+
+        case $TYPE in
+            default) _movedefault && _setdefault ;;
+            loose) _moveloose && _setloose ;;
+            *) _help ;;
+        esac
+    }
+
+    _switch_hosts() {
+        local inversetype
+
+        if  [[ $hoststype == "default" ]]; then
+          inversetype="loose"
+        else
+          inversetype="default"
+        fi
+
+        echo "Switching to hosts_$inversetype file"
+
+        case $hoststype in
+            default) _moveloose && _setloose ;;
+            loose) _movedefault && _setdefault ;;
+            blank) _list_hosts ;;
+            *) _help ;;
+        esac
+
+
+    }
+
+    _list_hosts() {
+        if [[ $hoststype == "blank"  ]]; then
+            read -p "Hosts file is empty. Restore? (y/n [n]) " restoreblank
+            case "$restoreblank" in
+                y|yes|Yes|YES|Y) _restore_hosts ;; # this is stupid but i am lazy
+                *) echo "Will not restore hosts file." ;;
+            esac
+        else
+            echo "Printing installed hosts_$hoststype file"
+            sleep 1
+            more "$HOSTS_FILE"
+        fi
+    }
+
+    _search_hosts() {
+        echo "Printing matches for $TYPE in $HOSTS_FILE"
+        sleep 1
+        grep -i "$TYPE" "$HOSTS_FILE" | more
+    }
+
+    _type() {
+        case $hoststype in
+            default) hostlink="($default)" ;;
+            loose) hostlink="($loose)" ;;
+            blank) hostlink="(no url)" ;;
+            *) _help ;;
+        esac
+
+        echo "$hoststype $hostlink"
+    }
+
+    _repl() {
+      local command
+      local arg
+      export HOSTS_PROMPT="[hosts] > "
+      while :
+      do
+        echo -n "$HOSTS_PROMPT"
+        read line
+        case "$line" in
+          "exit"|quit) return ;;
+          *) command=$(echo "$line" | awk '{print $1}');
+             arg=$(echo "$line" | awk '{print $2}')
+             hosts "$command" "$arg"
+          ;;
+        esac
+      done
+    }
+
+
+
+    # maybe a _create_new command that accepts a url and name
+    case "$OPT" in
+        allow|permit|whitelist) _allow ;;
+        clear) _clear_hosts ;;
+        list|print|cat) _list_hosts ;;
+        run|exec|execute|"read") _read_file ;;
+        restore|set|install) _restore_hosts ;;
+        schedule) _schedule ;;
+        search|find) _search_hosts ;;
+        switch|swap) _switch_hosts ;;
+        update|pull) _update_hosts ;;
+        type) _type ;;
+        repl) _repl ;;
+        *) _help ;;
+    esac
+}
+
+
