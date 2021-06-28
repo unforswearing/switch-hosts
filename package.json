@@ -1,6 +1,6 @@
 {
-  "name": "switch-hosts",
-  "version": "1.0.0",
+  "name": "switch-hosts-bash",
+  "version": "1.0.1",
   "description": "A simple hosts switcher using hosts files from https://github.com/StevenBlack/hosts",
   "main": "switchhosts",
   "scripts": {
